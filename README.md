@@ -1,2 +1,4 @@
 # RNA-seq-wf
-RNA-seq analysis of human dataset
+
+
+Dataset of 4 wildtype and 4 knockout samples were obtained through GEO accession. Fastqc 0.12.1-0 and multiqc 1.20 were run to perform quality control. Reads are aligned to human hg38 genome with GRCh38 primary assembly genome on STAR v2.7.11b to a bam file. Quality control is then performed on the aligned files using samtools flagstat 1.19.2. Verse was run using default parameters and gencode.vM34.primary_assembly.annotation.gtf to create a counts file for each sample and a python script was run to create a counts matrix and to filter. Differential expression analysis was performed using DESeq2 v1.42.1 with default parameters comparing the wildtypes to the knockouts.

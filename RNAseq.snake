@@ -1,0 +1,160 @@
+name = ["CTL","KO"]
+rep = ["rep1","rep2","rep3"]
+read = ["R1","R2"]
+sample_loc = '/projectnb/bf528/materials/project_3_individual/rnaseq/'
+
+rule all:
+	input: 'results/verse_concat_filtered.csv',  'results/id2gene.txt', 'results/multiqc_report.html', expand('results/{names}{reps}_flagstat.txt',names=name, reps=rep ), "Rscript.done" 
+
+rule fastqc:
+	input:
+		'/projectnb/bf528/materials/project_3_individual/rnaseq/{name}{rep}_{read}.fastq.gz'
+	output:
+		'results/{name}{rep}_{read}_fastqc.html'
+	threads: 4
+	params:
+		outdir = 'results/'
+	conda:
+		'envs/fastqc_env.yml'
+	shell:
+		'''
+		fastqc -o results {input}
+		'''
+
+rule multiqc:
+	input:
+		expand(['results/{names}{reps}_{reads}_fastqc.html'], names=name, reps=rep, reads=read, ),
+	output:
+		"results/multiqc_report.html"
+	params:
+		outdir = 'results/'
+	conda:
+		'envs/multiqc_env.yml'
+	shell:
+		'''
+		multiqc results -f -o results 
+		'''
+
+
+
+rule get_grch38:
+	output: "results/GRCh38.primary_assembly.genome.fa"
+	params: outdir = 'results/'
+	shell:
+		'''
+		wget -P {params.outdir} https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/latest_release/GRCh38.primary_assembly.genome.fa.gz
+		gzip -d results/GRCh38.primary_assembly.genome.fa.gz
+		'''
+
+
+rule get_anotation_gtf:
+	output: "results/gencode.v45.primary_assembly.annotation.gtf"
+	params: outdir = 'results/'
+	shell:
+		'''
+		wget -P {params.outdir}  https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/latest_release/gencode.v45.primary_assembly.annotation.gtf.gz
+		gzip -d results/gencode.v45.primary_assembly.annotation.gtf.gz
+		'''
+
+rule staridx:
+	input: 
+		gtf = 'results/gencode.v45.primary_assembly.annotation.gtf',
+		genome = 'results/GRCh38.primary_assembly.genome.fa',
+
+	output: "results/grch38_star/chrLength.txt"
+	shell:
+		'''
+		STAR --runThreadN 23 --runMode genomeGenerate --genomeDir results/grch38_star/ --genomeFastaFiles {input.genome} --sjdbGTFfile {input.gtf}
+		'''	
+
+rule star:
+	input:  samp1 = '/projectnb/bf528/materials/project_3_individual/rnaseq/{namerep}_R1.fastq.gz',
+		samp2 = '/projectnb/bf528/materials/project_3_individual/rnaseq/{namerep}_R2.fastq.gz',
+		idxcheck = 'results/grch38_star/chrLength.txt'
+	output:	outs = 'results/{namerep}Aligned.out.bam'
+	params: outpre = 'results/{namerep}' 
+	threads: 8
+	conda:
+		'envs/star.yml'
+	shell:
+		'''
+		STAR --runThreadN {threads} --outSAMtype BAM Unsorted --genomeDir results/grch38_star/ --readFilesCommand zcat --readFilesIn {input.samp1} {input.samp2} --outFileNamePrefix {params.outpre}
+		'''
+
+
+rule samtools_flagstat:
+	input: bam1 = 'results/{names}Aligned.out.bam'
+	output: flag1 = 'results/{names}_flagstat.txt'
+	conda:
+		'envs/samtools_env.yml'
+	shell:
+		'''
+		samtools flagstat {input} > {output}
+		'''
+
+
+rule verse:
+	input:
+		bam = 'results/{name}Aligned.out.bam',
+		gtf = 'results/gencode.v45.primary_assembly.annotation.gtf',
+	output:
+		verse_exons = 'results/{name}.exon.txt'
+	params:
+		prefix = 'results/{name}'
+	conda:
+		'envs/verse.yml'
+	shell:
+		'verse -S -a {input.gtf} -o {params.prefix} {input.bam}'
+
+
+
+rule concat_df:
+	input:
+		verse_files = expand('results/{names}{reps}.exon.txt', names=name, reps=rep)
+	output:
+		cts_matrix = 'results/verse_concat.csv'
+	shell:
+		'''
+		python concat_df.py -i {input.verse_files} -o {output.cts_matrix}
+		'''
+
+rule filter_cts:
+	input:
+		verse = 'results/verse_concat.csv'
+	output:
+		filtered = 'results/verse_concat_filtered.csv'
+	shell:
+		'''
+		python filter_cts_mat.py -i {input.verse} -o {output.filtered}
+		'''
+
+rule txn_mapping:
+	input:
+		gtf = 'results/gencode.v45.primary_assembly.annotation.gtf'
+	output:
+		mapping = 'results/id2gene.txt'
+	shell:
+		'''
+		python parse_gtf.py -i {input.gtf} -o {output.mapping}
+		'''
+
+
+
+rule rscript:
+        input:
+                counts = 'results/verse_concat_filtered.csv',
+                id = 'results/id2gene.txt'
+        output:
+                out = touch("Rscript.done")
+        conda:
+                'envs/Rscript.yml'
+        shell:
+                '''
+                Rscript --vanilla rplots.R
+                '''
+
+
+
+
+
+
